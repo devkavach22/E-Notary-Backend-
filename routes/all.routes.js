@@ -8,7 +8,7 @@ const {
   sendMobileOTP,
   verifyMobileOTP
 } = require("../controllers/advocate.controller");
-const { advocateLogin, adminLogin,
+const { login,
   sendForgetPasswordOtp, 
   confirmPassword} = require("../controllers/Auth.controller");
 const {
@@ -20,12 +20,12 @@ router.post("/send-otp", sendOTP);
 router.post("/verify-otp", verifyOTP);
 router.post("/send-mobile-otp", sendMobileOTP);
 router.post("/verify-mobile-otp", verifyMobileOTP);
+router.post("/login",login)
 
 
 router.post("/register", advocateUpload, handleUploadError, registerAdvocate);
 router.get("/:id", getAdvocateById);
-router.post("/advocate/login", advocateLogin);
-router.post("/admin/login", adminLogin);
+
 
 const {
   getAllAdvocates,
