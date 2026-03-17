@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const Advocate = require("../models/Advocate");
 const Admin = require("../models/Admin");
-const { generateOTP, sendForgetPasswordOTP } = require("../utils/email.utility");
+const { generateOTP, sendForgetPasswordOTP } = require("./sendOTP");
 
 // ─── OTP in-memory store ──────────────────────────────────
 const otpStore = new Map();
