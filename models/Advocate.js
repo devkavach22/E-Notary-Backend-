@@ -258,6 +258,11 @@ const advocateSchema = new mongoose.Schema(
       mobileVerified: { type: Boolean, default: false }, // ← ADD KARO
       faceMatchVerified: { type: Boolean, default: false },
     },
+
+    role: {
+      type: String,
+      default: "advocate",
+    },
   },
   {
     timestamps: true,
