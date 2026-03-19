@@ -13,8 +13,11 @@ const { login,
   confirmPassword} = require("../controllers/Auth.controller");
 const {
   advocateUpload,
+  userUpload,
   handleUploadError,
 } = require("../middlewares/upload.middleware");
+const { UserverifyDocuments,registerUser, getUserById } = require("../controllers/User.controller");
+
 
 router.post("/send-otp", sendOTP);
 router.post("/verify-otp", verifyOTP);
@@ -53,5 +56,12 @@ router.put("/admin/advocate/:id/verify-documents", adminAuth, verifyDocuments);
 
 router.put("/admin/advocate/:id/approve", adminAuth, approveAdvocate);
 router.put("/admin/advocate/:id/reject", adminAuth, rejectAdvocate);
+
+
+
+// User Creation Done -------
+router.post("/user/verify-documents", userUpload, handleUploadError, UserverifyDocuments);
+router.post("/user/register",         userUpload, handleUploadError, registerUser);
+router.get("/user/:id",               getUserById);
 
 module.exports = router;

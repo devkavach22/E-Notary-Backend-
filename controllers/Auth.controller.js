@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const Advocate = require("../models/Advocate");
 const Admin = require("../models/Admin");
+const User = require("../models/User"); 
 const { generateOTP, sendForgetPasswordOTP } = require("./sendOTP");
 
 // ─── OTP in-memory store ──────────────────────────────────
@@ -13,11 +14,6 @@ const generateToken = (id, role) => {
   });
 };
 
-// ─────────────────────────────────────────────────────────
-// @route   POST /api/auth/login
-// @desc    Single login for Admin and Advocate (auto-detect)
-// @access  Public
-// ─────────────────────────────────────────────────────────
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -37,7 +33,12 @@ const login = async (req, res) => {
       user = await Advocate.findOne({ email }).select("+password");
     }
 
-    // ── Not found in either ──
+    // ✅ If not Advocate, check User
+    if (!user) {
+      user = await User.findOne({ email }).select("+password");
+    }
+
+    // ── Not found in any ──
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -80,12 +81,16 @@ const login = async (req, res) => {
       message: "Login successful",
       token,
       data: {
-        id: user._id,
+        id:    user._id,
         email: user.email,
         role,
         ...(role === "advocate" && {
-          fullName: user.fullName,
+          fullName:       user.fullName,
           approvalStatus: user.approvalStatus,
+        }),
+        // ✅ User ke liye bhi fullName
+        ...(role === "user" && {
+          fullName: user.fullName,
         }),
       },
     });
@@ -99,9 +104,7 @@ const login = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────
-// @route   POST /api/auth/send-forget-password-otp
-// @desc    Send OTP to email - role auto detect
-// @access  Public
+// @route   POST /api/send-forget-password-otp
 // ─────────────────────────────────────────────────────────
 const sendForgetPasswordOtp = async (req, res) => {
   try {
@@ -114,11 +117,10 @@ const sendForgetPasswordOtp = async (req, res) => {
       });
     }
 
-    // ── Auto detect role ──
+    // ✅ User bhi check karo
     let user = await Admin.findOne({ email });
-    if (!user) {
-      user = await Advocate.findOne({ email });
-    }
+    if (!user) user = await Advocate.findOne({ email });
+    if (!user) user = await User.findOne({ email }); // ✅ add karo
 
     if (!user) {
       return res.status(404).json({
@@ -128,12 +130,10 @@ const sendForgetPasswordOtp = async (req, res) => {
     }
 
     const role = user.role;
-
-    const otp = generateOTP();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min
+    const otp  = generateOTP();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
 
     otpStore.set(email, { otp, expiresAt, role });
-
     await sendForgetPasswordOTP(email, otp);
 
     return res.status(200).json({
@@ -150,9 +150,7 @@ const sendForgetPasswordOtp = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────
-// @route   POST /api/auth/confirm-password
-// @desc    Verify OTP and set new password
-// @access  Public
+// @route   POST /api/confirm-password
 // ─────────────────────────────────────────────────────────
 const confirmPassword = async (req, res) => {
   try {
@@ -179,7 +177,6 @@ const confirmPassword = async (req, res) => {
       });
     }
 
-    // ── Verify OTP ──
     const record = otpStore.get(email);
 
     if (!record) {
@@ -204,9 +201,14 @@ const confirmPassword = async (req, res) => {
       });
     }
 
-    // ── OTP verified — update password ──
+    // ✅ role ke basis pe sahi model choose karo
     const { role } = record;
-    const Model = role === "admin" ? Admin : Advocate;
+    const Model = role === "admin"
+      ? Admin
+      : role === "advocate"
+      ? Advocate
+      : User; // ✅ user ke liye
+
     const user = await Model.findOne({ email }).select("+password");
 
     if (!user) {
@@ -216,10 +218,9 @@ const confirmPassword = async (req, res) => {
       });
     }
 
-    user.password = newPassword; // bcrypt hash via pre-save hook
+    user.password = newPassword;
     await user.save();
-
-    otpStore.delete(email); // OTP used, clean up
+    otpStore.delete(email);
 
     return res.status(200).json({
       success: true,

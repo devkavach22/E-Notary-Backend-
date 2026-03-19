@@ -94,5 +94,11 @@ const handleUploadError = (err, req, res, next) => {
 
   next();
 };
+const userUpload = upload.fields([
+  { name: "aadhaarFront", maxCount: 1 },
+  { name: "panCard",      maxCount: 1 },
+  { name: "liveSelfie",   maxCount: 1 },
+]);
 
-module.exports = { advocateUpload, handleUploadError };
+
+module.exports = { advocateUpload,userUpload, handleUploadError };
