@@ -128,29 +128,19 @@ const parseDOB = (dobInput) => {
 };
 
 // ═══════════════════════════════════════════════════════════
-// NAME EXTRACTION — FREQUENCY BASED
-//
-// Logic: Real name appears in ALL 4 OCR passes → high frequency.
-// Random OCR noise appears only once → low frequency.
-// Winner = highest frequency 2-gram of valid name words.
-//
-// KEY FIX: No fallback when freq < 2.
-// "KUKPS TAE" was picked by the freq=1 fallback — removed now.
+// NAME EXTRACTION — FREQUENCY BASED (Aadhaar only)
 // ═══════════════════════════════════════════════════════════
-
 const INVALID_WORDS = new Set([
   "INDIA", "AADHAAR", "UNIQUE", "AUTHORITY", "GOVERNMENT", "DEPT", "INCOME", "GOVT",
   "PERMANENT", "ACCOUNT", "NUMBER", "TAX", "DEPARTMENT", "CARD", "IDENTIFICATION",
   "ELECTION", "COMMISSION", "DIGITAL", "ENROLLMENT", "SIGNATURE", "MALE", "FEMALE",
   "DATE", "BIRTH", "MERA", "PEHCHAN", "AADHAR", "UIDAI",
-  // OCR garbage that accidentally passes vowel+length check
   "INDIN", "GOVORNMANT", "GOVURNMANT", "GOVEMMAONT", "GOVORNMENT", "BASTEN",
   "TEAL", "NAAN", "PERN", "GEEGT", "ITGET", "POMANNTHCCOUN",
   "UNGER", "ESTAS", "RAKE", "SPIN", "CENTRE", "CENTRAL", "OFFICE",
-  "KUKPS", "ESTAS", "UNGER", "BASTEN", "RAKE",
+  "KUKPS", "UNGER", "BASTEN",
 ]);
 
-// Valid name word: pure alpha uppercase, length >=3, has vowel, not invalid
 const isNameWord = (w) =>
   /^[A-Z]{3,}$/.test(w) &&
   /[AEIOU]/.test(w) &&
@@ -162,7 +152,6 @@ const isRealName = (name) => {
   return words.filter(w => /[AEIOU]/.test(w)).length >= 1 && words.length >= 2;
 };
 
-// rawText = 4 passes joined with "\n" — DO NOT pass flat cleaned string
 const extractNameByFrequency = (rawText, label = "") => {
   const lines = rawText
     .split(/[\n\r|]/)
@@ -174,7 +163,6 @@ const extractNameByFrequency = (rawText, label = "") => {
 
   for (const line of lines) {
     const words = line.split(/\s+/).filter(isNameWord);
-
     for (let i = 0; i < words.length - 1; i++) {
       const g = `${words[i]} ${words[i + 1]}`;
       freq2[g] = (freq2[g] || 0) + 1;
@@ -188,71 +176,29 @@ const extractNameByFrequency = (rawText, label = "") => {
   const best3 = Object.entries(freq3).sort((a, b) => b[1] - a[1])[0];
   const best2 = Object.entries(freq2).sort((a, b) => b[1] - a[1])[0];
 
-  // 3-gram winner (appears in 2+ passes)
   if (best3 && best3[1] >= 2) {
     console.log(`✅ Name (${label} - 3gram ${best3[1]}x):`, best3[0]);
     return best3[0];
   }
-
-  // 2-gram winner (appears in 2+ passes)
   if (best2 && best2[1] >= 2) {
     console.log(`✅ Name (${label} - 2gram ${best2[1]}x):`, best2[0]);
     return best2[0];
   }
 
-  // ❌ NO freq=1 fallback — that's what caused "KUKPS TAE"
-  // If name doesn't repeat across passes, OCR quality is too poor → return null
-  console.log(`❌ Name not reliably found in ${label} (best was: ${best2 ? best2[0] + " freq=" + best2[1] : "none"})`);
+  console.log(`❌ Name not reliably found in ${label}`);
   return null;
 };
 
 // ═══════════════════════════════════════════════════════════
-// SAME PERSON CHECK
-//
-// KEY FIX: If PAN name is null (OCR quality too poor),
-// we SKIP name check — don't reject valid documents.
-// Only hard-fail when BOTH names are extracted AND they differ,
-// OR when both DOBs are present AND they differ.
-// ═══════════════════════════════════════════════════════════
-const checkSamePerson = (aadhaarName, panName, aadhaarDob, panDob) => {
-  let nameMatch = true;
-  let dobMatch  = true;
-  let reason    = "";
-
-  // ── Name check — only when BOTH sides extracted ──
-  if (isRealName(aadhaarName) && isRealName(panName)) {
-    const p1      = aadhaarName.toUpperCase().split(" ").filter(w => w.length > 2);
-    const p2      = panName.toUpperCase().split(" ").filter(w => w.length > 2);
-    const matched = p1.filter(p => p2.some(p2w => p2w.includes(p) || p.includes(p2w))).length;
-    nameMatch = matched >= 1;
-    console.log(nameMatch
-      ? `✅ Names match: "${aadhaarName}" ↔ "${panName}"`
-      : `❌ Names DON'T match: "${aadhaarName}" ↔ "${panName}"`);
-    if (!nameMatch) reason = `Names do not match — Aadhaar: "${aadhaarName}", PAN: "${panName}"`;
-  } else {
-    // PAN OCR couldn't extract name reliably — skip, don't penalize
-    console.log(`⚠️  Name check skipped — Aadhaar: "${aadhaarName}", PAN: "${panName}"`);
-    nameMatch = true;
-  }
-
-  // ── DOB check — only when BOTH sides have DOB ──
-  if (aadhaarDob && panDob) {
-    const norm = (d) => d.replace(/[-\.]/g, "/").trim();
-    dobMatch = norm(aadhaarDob) === norm(panDob);
-    console.log(dobMatch
-      ? `✅ DOB matches: ${aadhaarDob}`
-      : `❌ DOB mismatch — Aadhaar: ${aadhaarDob}, PAN: ${panDob}`);
-    if (!dobMatch) reason = `Date of birth does not match — Aadhaar: ${aadhaarDob}, PAN: ${panDob}`;
-  } else {
-    console.log(`⚠️  DOB cross-check skipped — Aadhaar: ${aadhaarDob}, PAN: ${panDob}`);
-    dobMatch = true;
-  }
-
-  return { match: nameMatch && dobMatch, reason };
-};
-
-// ═══════════════════════════════════════════════════════════
 // @route  POST /api/user/verify-documents
+//
+// CURRENT BEHAVIOUR (free tier):
+//   ✅ Aadhaar OCR  — extract name, DOB, Aadhaar number
+//   ✅ PAN          — only upload & store path, NO OCR cross-check
+//   ❌ Same-person check — SKIPPED (paid API baad mein)
+//
+// TODO (paid API):
+//   Replace with Sandbox/DigiLocker API for real verification
 // ═══════════════════════════════════════════════════════════
 const UserverifyDocuments = async (req, res) => {
   try {
@@ -265,24 +211,16 @@ const UserverifyDocuments = async (req, res) => {
       });
     }
 
-    const results = {
-      aadhaar: { success: false, message: "" },
-      pan:     { success: false, message: "" },
-    };
-
     let extractedData = {
       fullName:      null,
       dateOfBirth:   null,
+      gender:        null,
       aadhaarNumber: null,
-      panNumber:     null,
+      panNumber:     null,   // PAN number — OCR se try karenge but optional
     };
 
-    let aadhaarName = null;
-    let panName     = null;
-    let panDob      = null;
-
     // ════════════════════════════════════════════════════════
-    // 1. AADHAAR — 4 OCR passes
+    // 1. AADHAAR — 4 OCR passes (primary verification)
     // ════════════════════════════════════════════════════════
     try {
       const p1 = await extractTextOriginal(files.aadhaarFront[0].path);
@@ -290,20 +228,15 @@ const UserverifyDocuments = async (req, res) => {
       const p3 = await extractTextCanvasBW(files.aadhaarFront[0].path);
       const p4 = await extractTextCanvasSharpen(files.aadhaarFront[0].path);
 
-      // Join with \n to preserve line structure for frequency analysis
       const aadhaarRaw  = [p1, p2, p3, p4].join("\n");
-      // Flat single-line for number/DOB patterns only
       const aadhaarFlat = cleanOCRText(aadhaarRaw);
 
-      console.log("\n========== AADHAAR PASS 1 (Original) ==========");
-      console.log(cleanOCRText(p1));
-      console.log("\n========== AADHAAR PASS 2 (Canvas Enhanced) ==========");
-      console.log(cleanOCRText(p2));
-      console.log("\n========== AADHAAR PASS 3 (Canvas B&W) ==========");
-      console.log(cleanOCRText(p3));
-      console.log("\n========== AADHAAR PASS 4 (Canvas Sharpen) ==========");
-      console.log(cleanOCRText(p4));
-      console.log("======================================================\n");
+      console.log("\n========== AADHAAR OCR ==========");
+      console.log("Pass 1:", cleanOCRText(p1).slice(0, 120));
+      console.log("Pass 2:", cleanOCRText(p2).slice(0, 120));
+      console.log("Pass 3:", cleanOCRText(p3).slice(0, 120));
+      console.log("Pass 4:", cleanOCRText(p4).slice(0, 120));
+      console.log("==================================\n");
 
       // ── Aadhaar Number ──
       for (const pat of [
@@ -340,146 +273,86 @@ const UserverifyDocuments = async (req, res) => {
         }
       }
 
-      // ── Name from Aadhaar — frequency method ──
-      aadhaarName = extractNameByFrequency(aadhaarRaw, "Aadhaar");
+      // ── Name from Aadhaar ──
+      const aadhaarName = extractNameByFrequency(aadhaarRaw, "Aadhaar");
+      if (isRealName(aadhaarName)) {
+        extractedData.fullName = aadhaarName;
+        console.log("✅ Name (Aadhaar):", aadhaarName);
+      }
 
-      results.aadhaar.success = !!extractedData.aadhaarNumber;
-      results.aadhaar.message = extractedData.aadhaarNumber
-        ? "Aadhaar verified successfully"
-        : "Could not extract Aadhaar number. Please upload a clearer image.";
+      // ── Gender from Aadhaar ──
+      if (/\bFEMALE\b/.test(aadhaarFlat)) {
+        extractedData.gender = "female";
+      } else if (/\bMALE\b/.test(aadhaarFlat)) {
+        extractedData.gender = "male";
+      } else {
+        extractedData.gender = null;
+      }
+      console.log("✅ Gender (Aadhaar):", extractedData.gender);
 
     } catch (err) {
       console.error("Aadhaar OCR Error:", err.message);
-      results.aadhaar.message = `Aadhaar OCR failed: ${err.message}`;
+      return res.status(400).json({
+        success: false,
+        message: "Could not read Aadhaar card. Please upload a clearer image.",
+      });
+    }
+
+    // ── Aadhaar number required ──
+    if (!extractedData.aadhaarNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Could not read Aadhaar number from the image. Please upload a clearer photo.",
+      });
     }
 
     // ════════════════════════════════════════════════════════
-    // 2. PAN — 4 OCR passes
+    // 2. PAN — 4 OCR passes, extract PAN number
+    //    ❌ NO cross-check with Aadhaar (paid API baad mein)
+    //    ✅ Sirf number nikalo aur auto-fill karo
     // ════════════════════════════════════════════════════════
     try {
-      const p1 = await extractTextOriginal(files.panCard[0].path);
-      const p2 = await extractTextCanvas(files.panCard[0].path);
-      const p3 = await extractTextCanvasBW(files.panCard[0].path);
-      const p4 = await extractTextCanvasSharpen(files.panCard[0].path);
+      const pp1 = await extractTextOriginal(files.panCard[0].path);
+      const pp2 = await extractTextCanvas(files.panCard[0].path);
+      const pp3 = await extractTextCanvasBW(files.panCard[0].path);
+      const pp4 = await extractTextCanvasSharpen(files.panCard[0].path);
 
-      const panRaw  = [p1, p2, p3, p4].join("\n");
-      const panFlat = cleanOCRText(panRaw);
+      const panFlat = cleanOCRText([pp1, pp2, pp3, pp4].join("\n"));
 
-      console.log("\n========== PAN PASS 1 (Original) ==========");
-      console.log(cleanOCRText(p1));
-      console.log("\n========== PAN PASS 2 (Canvas Enhanced) ==========");
-      console.log(cleanOCRText(p2));
-      console.log("\n========== PAN PASS 3 (Canvas B&W) ==========");
-      console.log(cleanOCRText(p3));
-      console.log("\n========== PAN PASS 4 (Canvas Sharpen) ==========");
-      console.log(cleanOCRText(p4));
-      console.log("==================================================\n");
+      console.log("\n========== PAN OCR ==========");
+      console.log("Pass 1:", cleanOCRText(pp1).slice(0, 120));
+      console.log("Pass 2:", cleanOCRText(pp2).slice(0, 120));
+      console.log("Pass 3:", cleanOCRText(pp3).slice(0, 120));
+      console.log("Pass 4:", cleanOCRText(pp4).slice(0, 120));
+      console.log("==============================\n");
 
-      // ── PAN Number ──
       const pm = panFlat.match(/[A-Z]{5}[0-9]{4}[A-Z]{1}/);
       if (pm) {
         extractedData.panNumber = pm[0];
         console.log("✅ PAN Number:", extractedData.panNumber);
       } else {
-        console.log("❌ PAN number not found");
+        console.log("⚠️  PAN number not found — user manually fill karega");
       }
-
-      // ── Name from PAN — frequency method ──
-      panName = extractNameByFrequency(panRaw, "PAN");
-
-      // ── DOB from PAN ──
-      for (const pat of [
-        /DATE\s*OF\s*BIRTH\s*[:\-]?\s*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})/,
-        /DOB\s*[:\-]?\s*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})/,
-        /(\d{2}\/\d{2}\/\d{4})/,
-        /(\d{2}-\d{2}-\d{4})/,
-        /(\d{2}\.\d{2}\.\d{4})/,
-      ]) {
-        const m = panFlat.match(pat);
-        if (m) {
-          panDob = (m[1] || m[0]).trim().replace(/[-\.]/g, "/");
-          console.log("✅ DOB (PAN):", panDob);
-          break;
-        }
-      }
-
-      // DOB fallback: if Aadhaar missed DOB, use PAN's
-      if (!extractedData.dateOfBirth && panDob) {
-        extractedData.dateOfBirth = panDob;
-        console.log("✅ DOB set from PAN fallback:", panDob);
-      }
-
-      results.pan.success = !!extractedData.panNumber;
-      results.pan.message = extractedData.panNumber
-        ? "PAN verified successfully"
-        : "Could not extract PAN number. Please upload a clearer image.";
-
     } catch (err) {
-      console.error("PAN OCR Error:", err.message);
-      results.pan.message = `PAN OCR failed: ${err.message}`;
+      console.warn("PAN OCR error (non-blocking):", err.message);
     }
 
     // ════════════════════════════════════════════════════════
-    // 3. Both numbers required
+    // 3. Return extracted data + file paths
+    //    same-person check = SKIPPED (paid API TODO)
     // ════════════════════════════════════════════════════════
-    if (!extractedData.aadhaarNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Could not read Aadhaar number. Please upload a clearer image.",
-      });
-    }
-    if (!extractedData.panNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Could not read PAN number. Please upload a clearer image.",
-      });
-    }
-
-    // ════════════════════════════════════════════════════════
-    // 4. SAME PERSON VALIDATION
-    // ════════════════════════════════════════════════════════
-    console.log("\n========== SAME PERSON VALIDATION ==========");
-    console.log("Aadhaar Name :", aadhaarName);
-    console.log("PAN Name     :", panName);
-    console.log("Aadhaar DOB  :", extractedData.dateOfBirth);
-    console.log("PAN DOB      :", panDob);
-
-    const sameCheck = checkSamePerson(
-      aadhaarName,
-      panName,
-      extractedData.dateOfBirth,
-      panDob
-    );
-    console.log("Result       :", sameCheck.match ? "✅ SAME PERSON" : "❌ DIFFERENT PERSON");
-    console.log("=============================================\n");
-
-    if (!sameCheck.match) {
-      return res.status(400).json({
-        success: false,
-        message: "Aadhaar and PAN card belong to different persons. Please upload documents of the same person.",
-        detail: sameCheck.reason,
-      });
-    }
-
-    // ════════════════════════════════════════════════════════
-    // 5. Final name — Aadhaar preferred, PAN fallback
-    // ════════════════════════════════════════════════════════
-    extractedData.fullName = isRealName(aadhaarName) ? aadhaarName
-      : isRealName(panName) ? panName
-      : null;
-
     console.log("\n========== FINAL EXTRACTED DATA ==========");
     console.log(JSON.stringify(extractedData, null, 2));
     console.log("==========================================\n");
 
     return res.status(200).json({
       success: true,
-      message: "Document verification completed",
-      results,
+      message: "Documents uploaded successfully",
       extractedData,
       autoFilled: {
         fullName:      !!extractedData.fullName,
         dateOfBirth:   !!extractedData.dateOfBirth,
+        gender:        !!extractedData.gender,
         aadhaarNumber: !!extractedData.aadhaarNumber,
         panNumber:     !!extractedData.panNumber,
       },
@@ -506,7 +379,7 @@ const registerUser = async (req, res) => {
       fullName, dateOfBirth,
       aadhaarNumber, panNumber,
       address, city, state, pincode,
-      purpose, gender,
+      gender,
       aadhaarFrontPath, panCardPath,
     } = req.body;
 
@@ -514,7 +387,7 @@ const registerUser = async (req, res) => {
 
     if (!email || !mobile || !password || !fullName || !dateOfBirth ||
         !aadhaarNumber || !panNumber || !address ||
-        !city || !state || !pincode || !purpose ||
+        !city || !state || !pincode ||
         !aadhaarFrontPath || !panCardPath) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
@@ -546,10 +419,9 @@ const registerUser = async (req, res) => {
     const user = await User.create({
       email, mobile, password,
       fullName, dateOfBirth: parsedDOB,
-      gender: gender || "other",
+      gender: gender || null,
       aadhaarNumber, panNumber,
       address, city, state, pincode,
-      purpose,
       liveSelfie: files.liveSelfie[0].path,
       documents: {
         aadhaarFront: aadhaarFrontPath,
@@ -557,6 +429,11 @@ const registerUser = async (req, res) => {
       },
       isEmailVerified:  true,
       isMobileVerified: true,
+      verificationChecks: {
+        aadhaarVerified:   true,  // OCR se verify ho gaya
+        panVerified:       true,  // OCR se verify ho gaya
+        faceMatchVerified: false, // TODO: paid API
+      },
     });
 
     return res.status(201).json({
